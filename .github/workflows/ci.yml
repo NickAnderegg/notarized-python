@@ -1,0 +1,123 @@
+name: Build Python image
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  PYTHON_GPG_KEY: "A035C8C19219BA821ECEA86B64E628F8D684696D"
+  PYTHON_VERSION: "3.10.6"
+
+  REGISTRY: ghcr.io
+  IMAGE_NAME: nickanderegg/notarized-python
+
+jobs:
+  authenticate-signing-key:
+    name: Authenticate current Python signing key
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate key with CAS
+        uses: codenotary/cas-authenticate-asset-github-action@main
+        with:
+          asset: --hash=${{ env.PYTHON_GPG_KEY }}
+          signerID: nick@anderegg.io
+
+  authenticate-source-code:
+    name: Authenticate Python source code
+    needs:
+      - authenticate-signing-key
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get Python source code and verify with GPG
+        run: |
+          set -eux;
+          curl -sL -o python-${PYTHON_VERSION}.tar.xz "https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz";
+          curl -sL -o python-${PYTHON_VERSION}.tar.xz.asc "https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz.asc";
+      - name: Authenticate source with CAS
+        id: auth-source
+        continue-on-error: true
+        uses: codenotary/cas-authenticate-asset-github-action@main
+        with:
+          asset: python-${{ env.PYTHON_VERSION }}.tar.xz
+          signerID: nick@anderegg.io
+
+      - name: Verify source with GPG key
+        id: verify-source
+        if: steps.auth-source.outcome == 'failure'
+        run: |
+          set -eux;
+
+          export GNUPGHOME="$(mktemp -d)"
+
+          gpg --batch --keyserver hkps://keys.openpgp.org --recv-keys "$PYTHON_GPG_KEY";
+          gpg --batch --verify python-${PYTHON_VERSION}.tar.xz.asc python-${PYTHON_VERSION}.tar.xz;
+          command -v gpgconf > /dev/null && gpgconf --kill all || :;
+          rm -rf "$GNUPGHOME" python-${PYTHON_VERSION}.tar.xz.asc;
+
+      - name: Notarize Python source code
+        if: steps.verify-source.outcome == 'success'
+        uses: codenotary/cas-notarize-asset-github-action@main
+        with:
+          asset: python-${{ env.PYTHON_VERSION }}.tar.xz
+          cas_api_key: ${{ secrets.CAS_API_KEY }}
+
+      - name: Upload Python source for next job
+        uses: actions/upload-artifact@v3
+        with:
+          name: python-${{ env.PYTHON_VERSION }}-src
+          path: python-${{ env.PYTHON_VERSION }}.tar.xz
+
+  notarize-source:
+    name: Notarize Python source code
+    needs:
+      - authenticate-source-code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Download Python source code artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: python-${{ env.PYTHON_VERSION }}-src
+
+      - name: Setup Docker image cache
+        uses: ScribeMD/docker-cache@0.2.2
+        with:
+          key: docker-${{ runner.os }}-${{ hashFiles(env.PYTHON_VERSION) }}
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v3.1.1
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Notarize Docker image
+        uses: codenotary/cas-notarize-docker-image-bom-github-action@main
+        with:
+          asset: docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          cas_api_key: ${{ secrets.CAS_API_KEY }}
+
+      - name: Test authentication of notarized Docker image
+        uses: codenotary/cas-authenticate-docker-bom-github-action@main
+        with:
+          asset: docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          signerID: nick@anderegg.io
+
