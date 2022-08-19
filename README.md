@@ -1,28 +1,6 @@
-# CodeNotary Work Sample
+# Building Docker images using trusted and authenticated source code
 
-## Prompt
-
-Describe how to use github actions to notarize and create a bom for docker, and for build artifacts.
-
-Resources:
-* https://github.com/codenotary/cas-notarize-docker-image-bom-github-action
-* https://github.com/codenotary/cas-authenticate-docker-bom-github-action
-* https://github.com/codenotary/cas-notarize-asset-github-action
-
-The action should only succeed if the source code has been notarized by your signerID, therefore a combination with the authenticate action is required: https://github.com/codenotary/cas-authenticate-asset-github-action
-
-## Tutorial
-
-* Verify signing key with signingID
-* If code isn't notarized:
-  * Check with signing key.
-  * Notarize code.
-* If code is notarized:
-  * Authenticate.
-
-Then use source to build Docker image.
-
----
+## Introduction
 
 This tutorial will demonstrate how to create a trusted Docker image for Python using GitHub Actions with CodeNotary's Community Attestastion Service.
 
@@ -49,6 +27,8 @@ In the snippet above, we define the GPG key used to sign Python source code rele
 ```bash
 cas notarize -n python-signing-key --hash A035C8C19219BA821ECEA86B64E628F8D684696D
 ```
+
+## Authenticating and Verifying the Source Code
 
 Our first job, `authenticate-signing-key`, will define steps to authenticate Python's signing key fingerprint before doing anything else:
 
@@ -148,3 +128,86 @@ The second job we need to define is a bit more complex, so let's break it down, 
           name: python-${{ env.PYTHON_VERSION }}-src
           path: python-${{ env.PYTHON_VERSION }}.tar.xz
 ```
+
+## Building the Docker Image
+
+The majority of the `build-image` job is taken up by boilerplate configuration:
+
+```yaml
+  build-image:
+    name: Build and notarize Python image for Docker
+    needs:
+      - authenticate-source-code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Download Python source code artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: python-${{ env.PYTHON_VERSION }}-src
+
+      - name: Authenticate source with CAS
+        uses: codenotary/cas-authenticate-asset-github-action@main
+        with:
+          asset: python-${{ env.PYTHON_VERSION }}.tar.xz
+          signerID: nick@anderegg.io
+
+      - name: Setup Docker image cache
+        uses: ScribeMD/docker-cache@0.2.2
+        with:
+          key: docker-${{ runner.os }}-${{ hashFiles(env.PYTHON_VERSION) }}
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v3.1.1
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+```
+
+In the job definition above, the `needs` key indicates that this job will only run if the `authenticate-source-code` job before it succeeds. This ensures that we won't build our Docker image using code that hasn't been either:
+
+* Authenticated as a trusted asset with the Community Attestastion Service.
+* Verified via a signature from a manually-trusted release signing key.
+
+You might also notice in the above snippet that we're using GitHub's `download-artifact` action to retrieve the source code archive we authenticated/verified in the previous job... and then we authenticate again! There is no way for the previous job to succeed without the current source archive having been verified, but because we are downloading the previous job's artifacts from where we stashed it on GitHub's servers, this ensures the source archive hasn't been changed in any way.
+
+When it comes to the "build and push" step for our Docker image, it runs the Dockerfile provided in this repo.
+
+> The actual Dockerfile used in this example is a modified version of the [Dockerfile defined for the official Python container image](# https://github.com/docker-library/python/blob/7b9d62e229bda6312b9f91b37ab83e33b4e34542/3.10/bullseye/Dockerfile). In particular, the lines which download and verify the Python source distribution have been removed. This functionality has been replaced by GitHub Actions, and the source code is instead added to the container via the Dockerfile command:
+>
+> `COPY ./python-${PYTHON_VERSION}.tar.xz .`
+
+After our new image has been built, we can generate a Software Bill of Materials (SBOM) for it, in order to verify integrity of the image in the future:
+
+```yaml
+      - name: Notarize Docker image
+        uses: codenotary/cas-notarize-docker-image-bom-github-action@main
+        with:
+          asset: docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
+          cas_api_key: ${{ secrets.CAS_API_KEY }}
+
+      - name: Test authentication of notarized Docker image
+        uses: codenotary/cas-authenticate-docker-bom-github-action@main
+        with:
+          asset: docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
+          signerID: nick@anderegg.io
+```
+
+As you can see from the above snippet, we end this job by authenticating our Docker image to ensure the notarization process was successful!

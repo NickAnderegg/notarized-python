@@ -83,6 +83,12 @@ jobs:
         with:
           name: python-${{ env.PYTHON_VERSION }}-src
 
+      - name: Authenticate source with CAS
+        uses: codenotary/cas-authenticate-asset-github-action@main
+        with:
+          asset: python-${{ env.PYTHON_VERSION }}.tar.xz
+          signerID: nick@anderegg.io
+
       - name: Setup Docker image cache
         uses: ScribeMD/docker-cache@0.2.2
         with:
@@ -120,4 +126,3 @@ jobs:
         with:
           asset: docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
           signerID: nick@anderegg.io
-
