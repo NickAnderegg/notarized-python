@@ -69,8 +69,8 @@ jobs:
           name: python-${{ env.PYTHON_VERSION }}-src
           path: python-${{ env.PYTHON_VERSION }}.tar.xz
 
-  notarize-source:
-    name: Notarize Python source code
+  build-image:
+    name: Build and notarize Python image for Docker
     needs:
       - authenticate-source-code
     runs-on: ubuntu-latest
@@ -112,12 +112,12 @@ jobs:
       - name: Notarize Docker image
         uses: codenotary/cas-notarize-docker-image-bom-github-action@main
         with:
-          asset: docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          asset: docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
           cas_api_key: ${{ secrets.CAS_API_KEY }}
 
       - name: Test authentication of notarized Docker image
         uses: codenotary/cas-authenticate-docker-bom-github-action@main
         with:
-          asset: docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          asset: docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
           signerID: nick@anderegg.io
 
