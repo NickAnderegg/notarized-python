@@ -80,7 +80,7 @@ The second job we need to define is a bit more complex, so let's break it down, 
         uses: codenotary/cas-authenticate-asset-github-action@main
         with:
           asset: python-${{ env.PYTHON_VERSION }}.tar.xz
-          signerID: nick@anderegg.io
+          signerID: YOUR_SIGNERID
 ```
 
 ### Step 3: Verify Source Signature
@@ -152,7 +152,7 @@ The majority of the `build-image` job is taken up by boilerplate configuration:
         uses: codenotary/cas-authenticate-asset-github-action@main
         with:
           asset: python-${{ env.PYTHON_VERSION }}.tar.xz
-          signerID: nick@anderegg.io
+          signerID: YOUR_SIGNERID
 
       - name: Setup Docker image cache
         uses: ScribeMD/docker-cache@0.2.2
@@ -207,7 +207,7 @@ After our new image has been built, we can generate a Software Bill of Materials
         uses: codenotary/cas-authenticate-docker-bom-github-action@main
         with:
           asset: docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
-          signerID: nick@anderegg.io
+          signerID: YOUR_SIGNERID
 ```
 
 As you can see from the above snippet, we end this job by authenticating our Docker image to ensure the notarization process was successful!
