@@ -190,7 +190,7 @@ You might also notice in the above snippet that we're using GitHub's `download-a
 
 When it comes to the "build and push" step for our Docker image, it runs the Dockerfile provided in this repo.
 
-> The actual Dockerfile used in this example is a modified version of the [Dockerfile defined for the official Python container image](# https://github.com/docker-library/python/blob/7b9d62e229bda6312b9f91b37ab83e33b4e34542/3.10/bullseye/Dockerfile). In particular, the lines which download and verify the Python source distribution have been removed. This functionality has been replaced by GitHub Actions, and the source code is instead added to the container via the Dockerfile command:
+> The actual Dockerfile used in this example is a modified version of the [Dockerfile defined for the official Python container image](https://github.com/docker-library/python/blob/7b9d62e229bda6312b9f91b37ab83e33b4e34542/3.10/bullseye/Dockerfile). In particular, the lines which download and verify the Python source distribution have been removed. This functionality has been replaced by GitHub Actions, and the source code is instead added to the container via the Dockerfile command:
 >
 > `COPY ./python-${PYTHON_VERSION}.tar.xz .`
 
